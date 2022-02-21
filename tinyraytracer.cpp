@@ -54,7 +54,21 @@ struct Sphere {
         if (t0 < 0) return false;
         return true;
     }
+
+    bool ray_intersect_lost(const Vec3f &orig, const Vec3f &dir, float &t1) const {
+        Vec3f L = center - orig;
+        float tca = L*dir;
+        float d2 = L*L - tca*tca;
+        if (d2 > radius*radius) return false;
+        float thc = sqrtf(radius*radius - d2);
+        t1 = tca + thc;
+        if (t1<0) return false;
+        return true;
+    } 
 };
+
+std::vector<Sphere> deathStar;
+Material mirror (1.0, Vec4f(0.0, 10.0, 0.8, 0.0), Vec3f(1.0, 1.0, 1.0), 1425.);
 
 Vec3f reflect(const Vec3f &I, const Vec3f &N) {
     return I - N*2.f*(I*N);
@@ -68,13 +82,11 @@ Vec3f refract(const Vec3f &I, const Vec3f &N, const float eta_t, const float eta
     return k<0 ? Vec3f(1,0,0) : I*eta + N*(eta*cosi - sqrtf(k)); // k<0 = total reflection, no ray to refract. I refract it anyways, this has no physical meaning
 }
 
-Material mirror (1.0, Vec4f(0.0, 10.0, 0.8, 0.0), Vec3f(1.0, 1.0, 1.0), 1425.);
 bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres, Vec3f &hit, Vec3f &N, Material &material) {
     //spheres
     float spheres_dist = std::numeric_limits<float>::max();
     for (size_t i=0; i < spheres.size(); i++) {
         float dist_i;
-        //cout<<i<<endl;
         if (spheres[i].ray_intersect(orig, dir, dist_i) && dist_i < spheres_dist) {
             spheres_dist = dist_i;
             hit = orig + dir*dist_i;
@@ -92,7 +104,39 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
             material = mirror;
         }
     }
-    
+    //death star
+    float dist_i;
+    float dist_hit_center;
+    Sphere deathStarMain=deathStar[0];
+    Sphere deathStarLost=deathStar[1];
+    //main star
+    if (deathStarMain.ray_intersect(orig, dir, dist_i) && dist_i < spheres_dist){ 
+            Vec3f centerLost = deathStarLost.center;
+            Vec3f hitSphereMain = orig + dir*dist_i;//distance of the center and the hit
+            dist_hit_center=(centerLost-hitSphereMain)*(centerLost-hitSphereMain).normalize();
+            if (dist_hit_center>= deathStarLost.radius)//if hit is not in the sphere lost
+            {
+                spheres_dist = dist_i;
+                hit = hitSphereMain;
+                N = (hit - deathStarMain.center).normalize();
+                material = deathStarMain.material;
+            }
+    }
+    //star lost
+    if (deathStarLost.ray_intersect_lost(orig, dir, dist_i) && dist_i < spheres_dist){
+            Vec3f centerMain = deathStarMain.center;
+            Vec3f hitSphereLost = orig + dir*dist_i;
+            dist_hit_center=(centerMain-hitSphereLost)*(centerMain-hitSphereLost).normalize();//distance of the center and the hit
+            if (dist_hit_center<= deathStarMain.radius)//if hit is in the sphere lost
+            {
+                spheres_dist = dist_i;
+                hit = hitSphereLost;
+                N = (deathStarLost.center-hit).normalize();
+                material = deathStarMain.material;
+            }
+    }
+       
+
     float checkerboard_dist = std::numeric_limits<float>::max();
     if (fabs(dir.y)>1e-3)  {
         float d = -(orig.y+4)/dir.y; // the checkerboard plane has equation y = -4
@@ -115,7 +159,7 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
     if (depth>4 || !scene_intersect(orig, dir, spheres, point, N, material)) {
         int a = std::max(0, std::min(envmap_width -1, static_cast<int>((atan2(dir.z, dir.x)/(2*M_PI) + .5)*envmap_width)));
         int b = std::max(0, std::min(envmap_height-1, static_cast<int>(acos(dir.y)/M_PI*envmap_height)));
-        return envmap[a+b*envmap_width]; // background
+        return envmap[a+b*envmap_width];
     }
 
     Vec3f reflect_dir = reflect(dir, N).normalize();
@@ -167,121 +211,45 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
             pixmap[i*3+j] = (unsigned char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][j])));
         }
     }
-    stbi_write_jpg("out.jpg", width, height, 3, pixmap.data(), 100);
+    stbi_write_jpg("out_normal.jpg", width, height, 3, pixmap.data(), 100);
 }
-
-void render_stereoscopic(const std::vector<Sphere> &spheres, const std::vector<Light> &lights) {
-     const float eyesep   = 0.2;
-    const int   delta    = 60; // focal distance 3
-    const int   width    = 960+delta;
-    const int   height   = 1080;
-    const float fov      = M_PI/3.;
-    std::vector<Vec3f> framebuffer1(width*height);
-    std::vector<Vec3f> framebuffer2(width*height);
-
-    #pragma omp parallel for
-    for (size_t j = 0; j<height; j++) { // actual rendering loop
-        for (size_t i = 0; i<width; i++) {
-            float dir_x =  (i + 0.5) -  width/2.;
-            float dir_y = -(j + 0.5) + height/2.;    // this flips the image at the same time
-            float dir_z = -height/(2.*tan(fov/2.));
-            framebuffer1[i+j*width] = cast_ray(Vec3f(-eyesep/2,0,0), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
-            framebuffer2[i+j*width] = cast_ray(Vec3f(+eyesep/2,0,0), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
-        }
-    }
-
-    if (0) { // draw the white grid
-        for (size_t j = 0; j<height; j++) {
-            for (size_t i = 0; i<width; i+=width/10) {
-                framebuffer2[i+j*width] = Vec3f(1,1,1);
-                framebuffer1[i+j*width] = Vec3f(1,1,1);
-            }
-        }
-        for (size_t i = 0; i<width; i++) {
-            for (size_t j = 0; j<height; j+=height/10) {
-                framebuffer2[i+j*width] = Vec3f(1,1,1);
-                framebuffer1[i+j*width] = Vec3f(1,1,1);
-            }
-        }
-    }
-
-    const float k1 = 0.12;
-    const float k2 = 0.10;
-
-    const float xc = (width-delta)/2.;
-    const float yc = height/2.;
-    const float R = std::min(width-delta, height)/2.f;
-
-    std::vector<unsigned char> pixmap((width-delta)*height*3*2);
-    for (size_t j = 0; j<height; j++) {
-        for (size_t i = 0; i<width-delta; i++) {
-            float xd = i;
-            float yd = j;
-            float r = std::sqrt(pow(xd-xc, 2) + pow(yd-yc, 2))/R;
-
-            int xu = xc+(xd-xc)*(1+k1*pow(r,2)+k2*pow(r,4));
-            int yu = yc+(yd-yc)*(1+k1*pow(r,2)+k2*pow(r,4));
-
-            Vec3f c1 (0,0,0), c2(0,0,0);
-            if (xu>=0 && xu<width-delta && yu>=0 && yu<height) {
-                c1 = framebuffer2[xu+yu*width+delta];
-                c2 = framebuffer2[xu+yu*width];
-            }
-
-            float max2 = std::max(c2[0], std::max(c2[1], c2[2]));
-            if (max2>1) c2 = c2*(1./max2);
-            float max1 = std::max(c1[0], std::max(c1[1], c1[2]));
-            if (max1>1) c1 = c1*(1./max1);
-
-            for (size_t d=0; d<3; d++) {
-                pixmap[(j*(width-delta)*2 + i            )*3+d] = 255*c1[d];
-                pixmap[(j*(width-delta)*2 + i+width-delta)*3+d] = 255*c2[d];
-            }
-        }
-    }
-    stbi_write_jpg("out_stereoscopic.jpg", (width-delta)*2, height, 3, pixmap.data(), 100);
-}
-
 
 void render_anaglyph(const std::vector<Sphere> &spheres, const std::vector<Light> &lights) {
-    const float eyesep   = 0.2;
-    const int   delta    = 60; // focal distance 3
-    const int   width    = 1024+delta;
+    const float offset   = 0.5;
+    const int   width   = 1024;
     const int   height   = 768;
     const float fov      = M_PI/3.;
-    std::vector<Vec3f> framebuffer1(width*height);
-    std::vector<Vec3f> framebuffer2(width*height);
-
+    std::vector<Vec3f> framebufferLeft(width*height);
+    std::vector<Vec3f> framebufferRight(width*height);
+    Vec3f framebufferAnaglyph;
     #pragma omp parallel for
     for (size_t j = 0; j<height; j++) { // actual rendering loop
         for (size_t i = 0; i<width; i++) {
             float dir_x =  (i + 0.5) -  width/2.;
             float dir_y = -(j + 0.5) + height/2.;    // this flips the image at the same time
             float dir_z = -height/(2.*tan(fov/2.));
-            framebuffer1[i+j*width] = cast_ray(Vec3f(-eyesep/2,0,0), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
-            framebuffer2[i+j*width] = cast_ray(Vec3f(+eyesep/2,0,0), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
+            framebufferLeft[i+j*width] = cast_ray(Vec3f(-offset,0,0), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
+            framebufferRight[i+j*width] = cast_ray(Vec3f(+offset,0,0), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
+            
         }
     }
 
-    std::vector<unsigned char> pixmap((width-delta)*height*3);
-    for (size_t j = 0; j<height; j++) {
-        for (size_t i = 0; i<width-delta; i++) {
-            Vec3f c1 = framebuffer1[i+delta+j*width];
-            Vec3f c2 = framebuffer2[i+      j*width];
-
+    std::vector<unsigned char> pixmap(width*height*3);
+    for (size_t i = 0; i < height*width; ++i) {
+            Vec3f c1 = framebufferLeft[i];
+            Vec3f c2 = framebufferRight[i];
             float max1 = std::max(c1[0], std::max(c1[1], c1[2]));
             if (max1>1) c1 = c1*(1./max1);
             float max2 = std::max(c2[0], std::max(c2[1], c2[2]));
             if (max2>1) c2 = c2*(1./max2);
-            float avg1 = (c1.x+c1.y+c1.z)/3.;
-            float avg2 = (c2.x+c2.y+c2.z)/3.;
-
-            pixmap[(j*(width-delta) + i)*3  ] = 255*avg1;
-            pixmap[(j*(width-delta) + i)*3+1] = 0;
-            pixmap[(j*(width-delta) + i)*3+2] = 255*avg2;
-        }
+            float blue=(c1.x+c1.y+c1.z)/3;
+            float red=(c2.x+c2.y+c2.z)/3;
+            framebufferAnaglyph=Vec3f(red,0,blue);
+            for (size_t j = 0; j<3; j++) {
+                pixmap[i*3+j] = (unsigned char)(255 * std::max(0.f, std::min(1.f,framebufferAnaglyph[j])));
+            }
     }
-    stbi_write_jpg("out_anaglyph.jpg", (width-delta), height, 3, pixmap.data(), 100);
+    stbi_write_jpg("out_anaglyph.jpg", width, height, 3, pixmap.data(), 100);
 }
 
 
@@ -304,7 +272,7 @@ int main() {
     Material      glass(1.5, Vec4f(0.0,  0.5, 0.1, 0.8), Vec3f(0.6, 0.7, 0.8),  125.);
     Material red_rubber(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.3, 0.1, 0.1),   10.);
     Material     mirror(1.0, Vec4f(0.0, 10.0, 0.8, 0.0), Vec3f(1.0, 1.0, 1.0), 1425.);
-    Material     death(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0, 0, 0),   10.);
+    Material     death(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.2, 0.2, 0.2),   10.);
     
     std::vector<Sphere> spheres;
     spheres.push_back(Sphere(Vec3f(-3,    0,   -16), 2,      ivory));
@@ -312,8 +280,11 @@ int main() {
     spheres.push_back(Sphere(Vec3f( 1.5, -0.5, -18), 3, red_rubber));
     spheres.push_back(Sphere(Vec3f( 7,    5,   -18), 4,     mirror));
     //death star
-    spheres.push_back(Sphere(Vec3f( -7, 4, -18), 3, death));
-    spheres.push_back(Sphere(Vec3f( -5, 6, -16), 2, death));
+    Sphere deathStarMain(Vec3f( -8, 4, -18), 3, death);
+    Sphere deathStarLost(Vec3f( -6, 6, -16.5), 1.5, death);
+    deathStar.push_back(deathStarMain);
+    deathStar.push_back(deathStarLost);
+
     std::vector<Light>  lights;
     lights.push_back(Light(Vec3f(-20, 20,  20), 1.5));
     lights.push_back(Light(Vec3f( 30, 50, -25), 1.8));
@@ -321,8 +292,7 @@ int main() {
 
 
     render(spheres, lights);
-    //render_stereoscopic(spheres, lights);
-    //render_anaglyph(spheres,lights);
+    render_anaglyph(spheres,lights);
 
     return 0;
 }
