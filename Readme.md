@@ -19,3 +19,5 @@ cd build
 cmake ..  
 make
 ```
+## exécution
+./ tinyraytracer
