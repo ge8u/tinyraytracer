@@ -7,7 +7,9 @@
 class Model {
 private:
     std::vector<Vec3f> verts;
-    std::vector<Vec3i> faces;
+    std::vector<Vec3i> faces; 
+    std::vector<Vec3f> normals;
+
 public:
     Model(const char *filename);
 
@@ -19,7 +21,9 @@ public:
     const Vec3f &point(int i) const;                   // coordinates of the vertex i
     Vec3f &point(int i);                   // coordinates of the vertex i
     int vert(int fi, int li) const;              // index of the vertex for the triangle fi and local index li
+    Vec3f normal(int fi);               //index of the normal for the triangle fi and local index li
     void get_bbox(Vec3f &min, Vec3f &max); // bounding box for all the vertices, including isolated ones
+
 };
 
 std::ostream& operator<<(std::ostream& out, Model &m);

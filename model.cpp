@@ -33,6 +33,13 @@ Model::Model(const char *filename) : verts(), faces() {
             if (3==cnt) faces.push_back(f);
         }
     }
+
+    for (int i = 0; i < (int) faces.size(); i++) {
+        Vec3f edge1 = point(vert(i,1)) - point(vert(i,0));
+        Vec3f edge2 = point(vert(i,2)) - point(vert(i,0));
+        normals.push_back(cross(edge1, edge2));
+    }
+
     std::cerr << "# v# " << verts.size() << " f# "  << faces.size() << std::endl;
 
     Vec3f min, max;
@@ -92,6 +99,10 @@ Vec3f &Model::point(int i) {
 int Model::vert(int fi, int li) const {
     assert(fi>=0 && fi<nfaces() && li>=0 && li<3);
     return faces[fi][li];
+}
+
+Vec3f Model::normal(int fi){
+    return normals[fi];
 }
 
 std::ostream& operator<<(std::ostream& out, Model &m) {
