@@ -1,9 +1,11 @@
 # HomeWork
+the map normal 
+![](https://github.com/ge8u/tinyraytracer/blob/main/out.jpg)
 
-the image normal with the duck triangulated mense and the death star:
+the map normal with the duck triangulated mense and the death star:
 ![](https://github.com/ge8u/tinyraytracer/blob/main/out_normal.jpg)
 
-the image anaglyph with the duck triangulated mense and the death star:
+the map anaglyph with the duck triangulated mense and the death star:
 ![](https://github.com/ge8u/tinyraytracer/blob/main/out_anaglyph.jpg)
 
 All the boring code (image/obj files serializer etc) is already there; to obtain the above image it suffices to add 10-20 lines of code.
